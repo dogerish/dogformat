@@ -18,7 +18,7 @@ function s:SkipFunc()
 		let l:flags = 'nz'
 		" if on the scope opener, include the scope opener in the search - 
 		" avoid false positive where it thinks a scope is inside itself
-		if getline('.')[col('.') - 1:] =~# l:scope
+		if getline('.')[col('.') - 1:] =~ l:scope
 			let l:flags .= 'c'
 		endif
 		if searchpair(l:scope, '', g:dogops[scope]['end'], l:flags, "s:IgnoreStringy()", line('.')) != 0
@@ -60,7 +60,8 @@ function s:ExpandScope(lnum, scope)
 	let l:count += 1
 	call s:FindPairOnLine(a:scope, '', g:dogops[a:scope]['end'], '')
 	call s:InsertBreak()
-	let l:count += 1
+	let l:count += s:ExpandLine(a:lnum + 1)
+	" restore cursor
 	call cursor(a:lnum, 1)
 	return l:count
 endfunction
@@ -72,7 +73,9 @@ function s:ExpandOpers(lnum, oper)
 	let l:count = 1
 	while s:FindOnLine(a:oper, '')
 		call s:AppendBreak()
-		let l:count += 1
+		let l:count += s:ExpandLine(a:lnum + l:count - 1)
+		" proceed to after the expanded line
+		call cursor(a:lnum + l:count - 1, 1)
 	endwhile
 	call cursor(a:lnum, 1)
 	return l:count
@@ -84,21 +87,24 @@ endfunction
 " is placed at the beginning of the expanded line (col 0)
 function s:ExpandLine(lnum)
 	call cursor(a:lnum, 1)
-	let l:count = 1
+	" don't reformat if it doesn't overflow
+	if &textwidth <= 0 || strdisplaywidth(getline('.')) <= &textwidth
+		return 1
+	endif
 	for l:operator in keys(g:dogops)->sort("s:ComparePrecedence")
-		" if the scope opener isn't found, skip it
-		if s:FindOnLine(l:operator, 'c') == 0
+		" if the operator isn't found or it's at the end of the line, skip it
+		if s:FindOnLine(l:operator, '') == 0 || getline('.')[col('.')-1:] =~ '^' . l:operator . '\s*$'
+			call cursor(a:lnum, 1)
 			continue
 		endif
+		" expand it as a scope if it's a scope operator
 		if g:dogscopes->index(l:operator) >= 0
-			let l:count = s:ExpandScope(a:lnum, l:operator)
-			echo l:count
-			break
+			return s:ExpandScope(a:lnum, l:operator)
+		else
+			return s:ExpandOpers(a:lnum, l:operator)
 		endif
-		let l:count = s:ExpandOpers(a:lnum, l:operator)
-		break
 	endfor
-	return l:count
+	return 1
 endfunction
 
 function DogFormat(lnum = v:lnum, count = v:count, char = v:char)
