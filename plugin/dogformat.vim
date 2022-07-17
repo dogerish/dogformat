@@ -77,6 +77,10 @@ function s:ExpandGroup(lnum, group)
 	call s:PatternBreak(a:group)
 	let l:count += s:ExpandLine(a:lnum)
 	call cursor(a:lnum + l:count, 1)
+	" fix indentation if the opening line was expanded
+	if l:count > 1
+		norm! ==
+	endif
 	call s:FindPairOnLine(a:group, '', g:dogops[a:group]['end'], '')
 	call s:InsertBreak()
 	let l:count += s:ExpandLine(a:lnum + l:count)
@@ -136,7 +140,4 @@ function DogFormat(lnum = v:lnum, count = v:count, char = v:char)
 	for l:i in range(a:count)
 		let l:lnum += s:ExpandLine(l:lnum)
 	endfor
-	" fix indentation
-	call cursor(a:lnum, 1)
-	exe 'norm! =' . (l:lnum - 1) . 'G'
 endfunction
