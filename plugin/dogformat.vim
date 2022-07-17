@@ -1,9 +1,9 @@
-let g:doggroups = ['{', '(', '\[']
+let g:doggroups = ['\[', '(', '{']
 let g:dogops = {
-			\ '\.':                                                 { 'z': 20  },
-			\ '{':                                                  { 'z': 19, 'end': '}'  },
+			\ '\[':                                                 { 'z': 20, 'end': '\]' },
+			\ '\.':                                                 { 'z': 19  },
 			\ '(':                                                  { 'z': 18, 'end': ')'  },
-			\ '\[':                                                 { 'z': 17, 'end': '\]' },
+			\ '{':                                                  { 'z': 17, 'end': '}'  },
 			\ '\*\*':                                               { 'z': 13  },
 			\ '*\|\/\|%':                                           { 'z': 12  },
 			\ '+\|-':                                               { 'z': 11  },
@@ -15,7 +15,7 @@ let g:dogops = {
 			\ '|':                                                  { 'z': 5   },
 			\ '&&':                                                 { 'z': 4   },
 			\ '||\|??':                                             { 'z': 3   },
-			\ '\%([+-*/%&^|]\|\*\*\|<<\|>>>\?\|&&\|||\|??)\?=\|=>': { 'z': 2   },
+			\ '\%([-+*/%&^|]\|\*\*\|<<\|>>>\?\|&&\|||\|??\)\?=\|=>': { 'z': 2   },
 			\ ',':                                                  { 'z': 1   }
 		\ }
 
@@ -33,7 +33,7 @@ function s:SkipFunc()
 		let l:flags = 'nz'
 		" if on the group opener, include the group opener in the search - 
 		" avoid false positive where it thinks a group is inside itself
-		if getline('.')[col('.') - 1:] =~ l:group
+		if getline('.')[col('.') - 1:] =~ '^\%(' . l:group . '\)'
 			let l:flags .= 'c'
 		endif
 		if searchpair(l:group, '', g:dogops[l:group]['end'], l:flags, "s:IgnoreStringy()", line('.')) != 0
@@ -52,11 +52,14 @@ function s:FindPairOnLine(start, mid, end, flags)
 	return searchpair(a:start, a:mid, a:end, a:flags, s:skip_expr, line('.'))
 endfunction
 
-function s:AppendBreak()
-	norm a
+" inserts a line break after a pattern match
+function s:PatternBreak(pat)
+	let l:len = getline('.')->matchstr(a:pat, col('.') - 1)->strlen()
+	call cursor(line('.'), col('.') + l:len)
+	call s:InsertBreak()
 endfunction
 function s:InsertBreak()
-	norm i
+	exe "norm! i\<CR>"
 endfunction
 
 function s:ComparePrecedence(i1, i2)
@@ -69,13 +72,15 @@ endfunction
 " s:ExpandLine
 function s:ExpandGroup(lnum, group)
 	call cursor(a:lnum, 1)
-	let l:count = 1
+	let l:count = 0
 	call s:FindOnLine(a:group, 'c')
-	call s:AppendBreak()
-	let l:count += 1
+	call s:PatternBreak(a:group)
+	let l:count += s:ExpandLine(a:lnum)
+	call cursor(a:lnum + l:count, 1)
 	call s:FindPairOnLine(a:group, '', g:dogops[a:group]['end'], '')
 	call s:InsertBreak()
-	let l:count += s:ExpandLine(a:lnum + 1)
+	let l:count += s:ExpandLine(a:lnum + l:count)
+	let l:count += s:ExpandLine(a:lnum + l:count)
 	" restore cursor
 	call cursor(a:lnum, 1)
 	return l:count
@@ -87,7 +92,7 @@ function s:ExpandOpers(lnum, oper)
 	call cursor(a:lnum, 1)
 	let l:count = 0
 	while s:FindOnLine(a:oper, '')
-		call s:AppendBreak()
+		call s:PatternBreak(a:oper)
 		let l:count += s:ExpandLine(a:lnum + l:count)
 		" proceed to after the expanded line
 		call cursor(a:lnum + l:count, 1)
@@ -109,7 +114,7 @@ function s:ExpandLine(lnum)
 	endif
 	for l:operator in keys(g:dogops)->sort("s:ComparePrecedence")
 		" if the operator isn't found or it's at the end of the line, skip it
-		if s:FindOnLine(l:operator, '') == 0 || getline('.')[col('.')-1:] =~ '^' . l:operator . '\s*$'
+		if s:FindOnLine(l:operator, '') == 0 || getline('.')[col('.')-1:] =~ '^\%(' . l:operator . '\)\s*$'
 			call cursor(a:lnum, 1)
 			continue
 		endif
@@ -128,7 +133,10 @@ function DogFormat(lnum = v:lnum, count = v:count, char = v:char)
 		return 1
 	endif
 	let l:lnum = a:lnum
-	for l:offset in range(a:count)
-		let l:lnum += s:ExpandLine(l:lnum + l:offset) - 1
+	for l:i in range(a:count)
+		let l:lnum += s:ExpandLine(l:lnum)
 	endfor
+	" fix indentation
+	call cursor(a:lnum, 1)
+	exe 'norm! =' . (l:lnum - 1) . 'G'
 endfunction
