@@ -14,14 +14,14 @@ endfunction
 function s:SkipFunc()
 	if s:IgnoreStringy() | return 1 | endif
 	" skip if in a scope
-	for scope in g:dogscopes
-		let flags = 'nz'
+	for l:scope in g:dogscopes
+		let l:flags = 'nz'
 		" if on the scope opener, include the scope opener in the search - 
 		" avoid false positive where it thinks a scope is inside itself
-		if getline('.')[col('.') - 1:] =~# scope
-			let flags .= 'c'
+		if getline('.')[col('.') - 1:] =~# l:scope
+			let l:flags .= 'c'
 		endif
-		if searchpair(scope, '', g:dogops[scope]['end'], flags, "s:IgnoreStringy()", line('.')) != 0
+		if searchpair(l:scope, '', g:dogops[scope]['end'], l:flags, "s:IgnoreStringy()", line('.')) != 0
 			return 1
 		endif
 	endfor
@@ -45,37 +45,37 @@ function s:InsertBreak()
 endfunction
 
 function s:ComparePrecedence(i1, i2)
-	let [z1, z2] = [g:dogops[a:i1]['z'], g:dogops[a:i2]['z']]
-	if z1 == z2 | return 0 | endif
-	return (z1 > z2) ? -1 : 1
+	let [l:z1, l:z2] = [g:dogops[a:i1]['z'], g:dogops[a:i2]['z']]
+	if l:z1 == l:z2 | return 0 | endif
+	return (l:z1 > l:z2) ? -1 : 1
 endfunction
 
 " expands the scope (key of dogscopes) in line lnum. otherwise the same as 
 " s:ExpandLine
 function s:ExpandScope(lnum, scope)
 	call cursor(a:lnum, 1)
-	let count = 1
+	let l:count = 1
 	call s:FindOnLine(a:scope, 'c')
 	call s:AppendBreak()
-	let count += 1
+	let l:count += 1
 	call s:FindPairOnLine(a:scope, '', g:dogops[a:scope]['end'], '')
 	call s:InsertBreak()
-	let count += 1
+	let l:count += 1
 	call cursor(a:lnum, 1)
-	return count
+	return l:count
 endfunction
 
 " expands the operator sequence on line lnum into multiple lines. like 
 " s:ExpandLine
 function s:ExpandOpers(lnum, oper)
 	call cursor(a:lnum, 1)
-	let count = 1
+	let l:count = 1
 	while s:FindOnLine(a:oper, '')
 		call s:AppendBreak()
-		let count += 1
+		let l:count += 1
 	endwhile
 	call cursor(a:lnum, 1)
-	return count
+	return l:count
 endfunction
 
 " expands the line lnum as much as needed to try and meet the textwidth 
@@ -84,28 +84,29 @@ endfunction
 " is placed at the beginning of the expanded line (col 0)
 function s:ExpandLine(lnum)
 	call cursor(a:lnum, 1)
-	let count = 1
-	for operator in keys(g:dogops)->sort("s:ComparePrecedence")
+	let l:count = 1
+	for l:operator in keys(g:dogops)->sort("s:ComparePrecedence")
 		" if the scope opener isn't found, skip it
-		if s:FindOnLine(operator, 'c') == 0
+		if s:FindOnLine(l:operator, 'c') == 0
 			continue
 		endif
-		if g:dogscopes->index(operator) >= 0
-			let count = s:ExpandScope(a:lnum, operator)
+		if g:dogscopes->index(l:operator) >= 0
+			let l:count = s:ExpandScope(a:lnum, l:operator)
+			echo l:count
 			break
 		endif
-		let count = s:ExpandOpers(a:lnum, operator)
+		let l:count = s:ExpandOpers(a:lnum, l:operator)
 		break
 	endfor
-	return count
+	return l:count
 endfunction
 
 function DogFormat(lnum = v:lnum, count = v:count, char = v:char)
 	if mode() =~? 'R\|i'
 		return 1
 	endif
-	let lnum = a:lnum
-	for offset in range(a:count)
-		let lnum += s:ExpandLine(lnum + offset)
+	let l:lnum = a:lnum
+	for l:offset in range(a:count)
+		let l:lnum += s:ExpandLine(l:lnum + l:offset) - 1
 	endfor
 endfunction
