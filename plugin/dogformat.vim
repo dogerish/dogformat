@@ -1,7 +1,22 @@
-let g:dogscopes = ['(']
+let g:doggroups = ['{', '(', '\[']
 let g:dogops = {
-			\ '(': { 'z': 0, 'end': ')' },
-			\ ',': { 'z': 10 }
+			\ '\.':                                                 { 'z': 20  },
+			\ '{':                                                  { 'z': 19, 'end': '}'  },
+			\ '(':                                                  { 'z': 18, 'end': ')'  },
+			\ '\[':                                                 { 'z': 17, 'end': '\]' },
+			\ '\*\*':                                               { 'z': 13  },
+			\ '*\|\/\|%':                                           { 'z': 12  },
+			\ '+\|-':                                               { 'z': 11  },
+			\ '<<\|>>\|>>>':                                        { 'z': 10  },
+			\ '<=\?\|>=\?':                                         { 'z': 9   },
+			\ '[!=]==\?':                                           { 'z': 8   },
+			\ '&':                                                  { 'z': 7   },
+			\ '\^':                                                 { 'z': 6   },
+			\ '|':                                                  { 'z': 5   },
+			\ '&&':                                                 { 'z': 4   },
+			\ '||\|??':                                             { 'z': 3   },
+			\ '\%([+-*/%&^|]\|\*\*\|<<\|>>>\?\|&&\|||\|??)\?=\|=>': { 'z': 2   },
+			\ ',':                                                  { 'z': 1   }
 		\ }
 
 let s:skip_expr = 's:SkipFunc()'
@@ -13,15 +28,15 @@ endfunction
 
 function s:SkipFunc()
 	if s:IgnoreStringy() | return 1 | endif
-	" skip if in a scope
-	for l:scope in g:dogscopes
+	" skip if in a group
+	for l:group in g:doggroups
 		let l:flags = 'nz'
-		" if on the scope opener, include the scope opener in the search - 
-		" avoid false positive where it thinks a scope is inside itself
-		if getline('.')[col('.') - 1:] =~ l:scope
+		" if on the group opener, include the group opener in the search - 
+		" avoid false positive where it thinks a group is inside itself
+		if getline('.')[col('.') - 1:] =~ l:group
 			let l:flags .= 'c'
 		endif
-		if searchpair(l:scope, '', g:dogops[scope]['end'], l:flags, "s:IgnoreStringy()", line('.')) != 0
+		if searchpair(l:group, '', g:dogops[l:group]['end'], l:flags, "s:IgnoreStringy()", line('.')) != 0
 			return 1
 		endif
 	endfor
@@ -47,18 +62,18 @@ endfunction
 function s:ComparePrecedence(i1, i2)
 	let [l:z1, l:z2] = [g:dogops[a:i1]['z'], g:dogops[a:i2]['z']]
 	if l:z1 == l:z2 | return 0 | endif
-	return (l:z1 > l:z2) ? -1 : 1
+	return (l:z1 < l:z2) ? -1 : 1
 endfunction
 
-" expands the scope (key of dogscopes) in line lnum. otherwise the same as 
+" expands the group (key of doggroups) in line lnum. otherwise the same as 
 " s:ExpandLine
-function s:ExpandScope(lnum, scope)
+function s:ExpandGroup(lnum, group)
 	call cursor(a:lnum, 1)
 	let l:count = 1
-	call s:FindOnLine(a:scope, 'c')
+	call s:FindOnLine(a:group, 'c')
 	call s:AppendBreak()
 	let l:count += 1
-	call s:FindPairOnLine(a:scope, '', g:dogops[a:scope]['end'], '')
+	call s:FindPairOnLine(a:group, '', g:dogops[a:group]['end'], '')
 	call s:InsertBreak()
 	let l:count += s:ExpandLine(a:lnum + 1)
 	" restore cursor
@@ -70,13 +85,14 @@ endfunction
 " s:ExpandLine
 function s:ExpandOpers(lnum, oper)
 	call cursor(a:lnum, 1)
-	let l:count = 1
+	let l:count = 0
 	while s:FindOnLine(a:oper, '')
 		call s:AppendBreak()
-		let l:count += s:ExpandLine(a:lnum + l:count - 1)
+		let l:count += s:ExpandLine(a:lnum + l:count)
 		" proceed to after the expanded line
-		call cursor(a:lnum + l:count - 1, 1)
+		call cursor(a:lnum + l:count, 1)
 	endwhile
+	let l:count += s:ExpandLine(a:lnum + l:count)
 	call cursor(a:lnum, 1)
 	return l:count
 endfunction
@@ -97,9 +113,9 @@ function s:ExpandLine(lnum)
 			call cursor(a:lnum, 1)
 			continue
 		endif
-		" expand it as a scope if it's a scope operator
-		if g:dogscopes->index(l:operator) >= 0
-			return s:ExpandScope(a:lnum, l:operator)
+		" expand it as a group if it's a group operator
+		if g:doggroups->index(l:operator) >= 0
+			return s:ExpandGroup(a:lnum, l:operator)
 		else
 			return s:ExpandOpers(a:lnum, l:operator)
 		endif
