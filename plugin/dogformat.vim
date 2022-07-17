@@ -1,22 +1,28 @@
 let g:doggroups = ['\[', '(', '{']
+" flags:
+"	b - break before this operator
+"	B - break before the ending operator
+"	a - break after this operator
+"	A - break after the ending operator
+let s:dflags = 'aB'
 let g:dogops = {
-			\ '\[':                                                 { 'z': 20, 'end': '\]' },
-			\ '\.':                                                 { 'z': 19  },
-			\ '(':                                                  { 'z': 18, 'end': ')'  },
-			\ '{':                                                  { 'z': 17, 'end': '}'  },
-			\ '\*\*':                                               { 'z': 13  },
-			\ '*\|\/\|%':                                           { 'z': 12  },
-			\ '+\|-':                                               { 'z': 11  },
-			\ '<<\|>>\|>>>':                                        { 'z': 10  },
-			\ '<=\?\|>=\?':                                         { 'z': 9   },
-			\ '[!=]==\?':                                           { 'z': 8   },
-			\ '&':                                                  { 'z': 7   },
-			\ '\^':                                                 { 'z': 6   },
-			\ '|':                                                  { 'z': 5   },
-			\ '&&':                                                 { 'z': 4   },
-			\ '||\|??':                                             { 'z': 3   },
+			\ '\[':                                                  { 'z': 20, 'end': '\]' },
+			\ '\.':                                                  { 'z': 19, 'flags': 'b' },
+			\ '(':                                                   { 'z': 18, 'end': ')'  },
+			\ '{':                                                   { 'z': 17, 'end': '}'  },
+			\ '\*\*':                                                { 'z': 13  },
+			\ '*\|\/\|%':                                            { 'z': 12  },
+			\ '+\|-':                                                { 'z': 11  },
+			\ '<<\|>>\|>>>':                                         { 'z': 10  },
+			\ '<=\?\|>=\?':                                          { 'z': 9   },
+			\ '[!=]==\?':                                            { 'z': 8   },
+			\ '&':                                                   { 'z': 7   },
+			\ '\^':                                                  { 'z': 6   },
+			\ '|':                                                   { 'z': 5   },
+			\ '&&':                                                  { 'z': 4   },
+			\ '||\|??':                                              { 'z': 3   },
 			\ '\%([-+*/%&^|]\|\*\*\|<<\|>>>\?\|&&\|||\|??\)\?=\|=>': { 'z': 2   },
-			\ ',':                                                  { 'z': 1   }
+			\ ',':                                                   { 'z': 1   }
 		\ }
 
 let s:skip_expr = 's:SkipFunc()'
@@ -46,18 +52,64 @@ endfunction
 function s:FindOnLine(pat, flags)
 	return search(a:pat, a:flags, line('.'), 0, s:skip_expr)
 endfunction
+" finds operator if unexpanded on the line. returns 0 if not found
+function s:FindOper(oper, flags)
+	if s:OperHasFlag(a:oper, 'a')
+		" match has to not be followed by only whitespace
+		return s:FindOnLine(a:oper, a:flags) &&
+					\ getline('.')[s:MatchEnd(a:oper):] !~ '^\s*$'
+	elseif s:OperHasFlag(a:oper, 'b')
+		" no matches at all
+		if s:FindOnLine(a:oper, a:flags) == 0
+			return 0
+		endif
+		let l:noc = substitute(a:flags, 'c', '', '')
+		" match has to not be prepended by only whitespace. if it was, there 
+		" must be another match after it
+		if getline('.')[:col('.') - 2] =~ '^\s*$' &&
+					\ s:FindOnLine(a:oper, l:noc) == 0
+			return 0
+		endif
+		" found the match
+		return 1
+	endif
+endfunction
 
 " finds pair on the line using searchpair
 function s:FindPairOnLine(start, mid, end, flags)
 	return searchpair(a:start, a:mid, a:end, a:flags, s:skip_expr, line('.'))
 endfunction
 
-" inserts a line break after a pattern match
-function s:PatternBreak(pat)
-	let l:len = getline('.')->matchstr(a:pat, col('.') - 1)->strlen()
-	call cursor(line('.'), col('.') + l:len)
-	call s:InsertBreak()
+function s:OperHasFlag(oper, flag, end = 0)
+	let l:flags = g:dogops[a:oper]->has_key('flags') ? g:dogops[a:oper]['flags'] : s:dflags
+	return l:flags =~# (a:end ? toupper(a:flag) : a:flag)
 endfunction
+
+" move cursor to end of match, so an insert command would insert directly after
+function s:MatchEnd(pat)
+	let l:len = getline('.')->matchstr(a:pat, col('.') - 1)->strlen()
+	return col('.') + l:len
+endfunction
+
+" inserts a line break for an operator, handling the flags as needed. assumes 
+" that the cursor is positioned at the start of the pattern match. if end is 
+" non-zero, the g:dogops[a:oper]['end'] is used instead of a:oper
+function s:OperBreak(oper, end = 0)
+	let l:realpat = a:end ? g:dogops[a:oper]['end'] : a:oper
+	if s:OperHasFlag(a:oper, 'b', a:end)
+		call s:InsertBreak()
+		call cursor(line('.'), 1 + s:MatchEnd(l:realpat))
+	endif
+	if s:OperHasFlag(a:oper, 'a', a:end)
+		call cursor(line('.'), s:MatchEnd(l:realpat))
+		call s:InsertBreak()
+	endif
+	" has neither of the flags
+	if !s:OperHasFlag(a:oper, 'b\|a', a:end)
+		throw 'Operator needs at least one of the b or a flags'
+	endif
+endfunction
+
 function s:InsertBreak()
 	exe "norm! i\<CR>"
 endfunction
@@ -71,10 +123,9 @@ endfunction
 " expands the group (key of doggroups) in line lnum. otherwise the same as 
 " s:ExpandLine
 function s:ExpandGroup(lnum, group)
-	call cursor(a:lnum, 1)
 	let l:count = 0
 	call s:FindOnLine(a:group, 'c')
-	call s:PatternBreak(a:group)
+	call s:OperBreak(a:group)
 	let l:count += s:ExpandLine(a:lnum)
 	call cursor(a:lnum + l:count, 1)
 	" fix indentation if the opening line was expanded
@@ -82,7 +133,7 @@ function s:ExpandGroup(lnum, group)
 		norm! ==
 	endif
 	call s:FindPairOnLine(a:group, '', g:dogops[a:group]['end'], '')
-	call s:InsertBreak()
+	call s:OperBreak(a:group, 1)
 	let l:count += s:ExpandLine(a:lnum + l:count)
 	let l:count += s:ExpandLine(a:lnum + l:count)
 	" restore cursor
@@ -93,10 +144,9 @@ endfunction
 " expands the operator sequence on line lnum into multiple lines. like 
 " s:ExpandLine
 function s:ExpandOpers(lnum, oper)
-	call cursor(a:lnum, 1)
 	let l:count = 0
-	while s:FindOnLine(a:oper, '')
-		call s:PatternBreak(a:oper)
+	while s:FindOper(a:oper, '')
+		call s:OperBreak(a:oper)
 		let l:count += s:ExpandLine(a:lnum + l:count)
 		" proceed to after the expanded line
 		call cursor(a:lnum + l:count, 1)
@@ -109,27 +159,39 @@ endfunction
 " expands the line lnum as much as needed to try and meet the textwidth 
 " criteria. Returns the number of lines that the original line now takes up. If 
 " no changes are made, 1 will be returned (still 1 line of occupancy). Cursor 
-" is placed at the beginning of the expanded line (col 0)
+" is placed at the beginning of the expanded line and in column 1
 function s:ExpandLine(lnum)
 	call cursor(a:lnum, 1)
 	" don't reformat if it doesn't overflow
 	if &textwidth <= 0 || strdisplaywidth(getline('.')) <= &textwidth
 		return 1
 	endif
+	let l:chosen = ''
 	for l:operator in keys(g:dogops)->sort("s:ComparePrecedence")
+		call cursor(a:lnum, 1)
 		" if the operator isn't found or it's at the end of the line, skip it
-		if s:FindOnLine(l:operator, '') == 0 || getline('.')[col('.')-1:] =~ '^\%(' . l:operator . '\)\s*$'
-			call cursor(a:lnum, 1)
+		if s:FindOper(l:operator, 'c') == 0
 			continue
 		endif
-		" expand it as a group if it's a group operator
-		if g:doggroups->index(l:operator) >= 0
-			return s:ExpandGroup(a:lnum, l:operator)
-		else
-			return s:ExpandOpers(a:lnum, l:operator)
+		" check if it's suboptimal (leaves the line overflowing, so keep 
+		" searching for an optimal choice)
+		if virtcol('.') > &textwidth
+			" don't override existing suboptimal choice
+			if l:chosen == '' | let l:chosen = l:operator | endif
+			continue
 		endif
+		" optimal choice found
+		let l:chosen = l:operator
+		break
 	endfor
-	return 1
+	if l:chosen == '' | return 1 | endif
+	call cursor(a:lnum, 1)
+	" expand it as a group if it's a group operator
+	if g:doggroups->index(l:chosen) >= 0
+		return s:ExpandGroup(a:lnum, l:chosen)
+	else
+		return s:ExpandOpers(a:lnum, l:chosen)
+	endif
 endfunction
 
 function DogFormat(lnum = v:lnum, count = v:count, char = v:char)
