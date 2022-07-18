@@ -1,9 +1,13 @@
+" when 1, it redraws and pauses for this amount of milliseconds after each 
+" insert. nice for debugging or demo'ing
+if !exists("g:dogslow") | let g:dogslow = 0 | endif
+" Add or override operators
+if !exists("g:dogops") | let g:dogops = {} | endif
 " flags:
 "	b - break before this operator
 "	a - break after this operator (always on for groups)
 "	B - break before the ending operator
 let s:dflags = 'aB'
-" Add or override operators with g:dogops
 let s:dops = {
 			\ '\[':                                                 { 'z': 20, 'end':   '\]' },
 			\ '\.':                                                 { 'z': 19, 'flags': 'b'  },
@@ -113,8 +117,10 @@ endfunction
 " insert a line break with optional mode instead of insert
 function s:InsertBreak(mode = 'i')
 	exe "norm! " . a:mode . "\<CR>"
-	redraw
-	sleep 200m
+	if g:dogslow
+		redraw
+		exe 'sleep '..g:dogslow..'m'
+	endif
 endfunction
 " return byte column where the break for the operator would be inserted and a 
 " value that says whether it could have more to insert (1) or not (0). [col, 
