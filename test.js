@@ -18,7 +18,7 @@ long_list = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 2000000]
 // equals sign
 Camera = new Object("CAMERA", new Vector2(ScreenWidth, ScreenHeight), new Vector2(0, 0));
 (.ajdsfkjadsjfhakjsdfhkljasdlfkjadskfhlaksjfhasd.bruh)
-// TODO: don't insert another newline 
+// DONE: don't insert another newline 
 // if the operator is already at the 
 // beginning of the line
 function doStuff(argument, wheat)

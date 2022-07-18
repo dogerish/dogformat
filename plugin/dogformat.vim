@@ -1,10 +1,10 @@
-let g:doggroups = ['\[', '(', '{']
 " flags:
 "	b - break before this operator
 "	a - break after this operator (always on for groups)
 "	B - break before the ending operator
 let s:dflags = 'aB'
-let g:dogops = {
+" Add or override operators with g:dogops
+let s:dops = {
 			\ '\[':                                                 { 'z': 20, 'end':   '\]' },
 			\ '\.':                                                 { 'z': 19, 'flags': 'b'  },
 			\ '(':                                                  { 'z': 18, 'end':   ')'  },
@@ -24,48 +24,84 @@ let g:dogops = {
 			\ ',':                                                  { 'z': 1   }
 		\ }
 
-let s:skip_expr = 's:SkipFunc()'
+" script vars that are generated
+let s:ops = {}
+let s:opkeys = []
+let s:groups = []
 
-" skip if in a string-like
-function s:IgnoreStringy()
-	return synIDattr(synID(line('.'), col('.'), 0), "name") =~? "string\\|comment"
+let s:skip_expr = 's:InStringlike() || s:InGroup()'
+" returns 1 if position line, col is in a string-like (string or comment)
+function s:InStringlike()
+	return synID(line('.'),col('.'),0)->synIDattr("name") =~? 'string\|comment'
 endfunction
-
-function s:SkipFunc()
-	if s:IgnoreStringy() | return 1 | endif
-	" skip if in a group
-	for l:group in g:doggroups
-		let l:flags = 'nbz'
+" returns 1 if the cursor is in a group that starts on the current line
+" preconditions: script vars are generated
+function s:InGroup()
+	let [l:l, l:c] = [line('.'), col('.')]
+	for l:g in s:groups
 		" if on the group opener, don't include the group opener in the search 
 		" - avoid false positive where it thinks a group is inside itself
-		if getline('.')[col('.') - 1:] =~ '^\%(' . g:dogops[l:group]['end'] . '\)'
-			let l:flags .= 'c'
-		endif
-		if searchpair(l:group, '', g:dogops[l:group]['end'], l:flags, "s:IgnoreStringy()", line('.')) != 0
+		let l:f = (getline(l:l)[l:c-1:] =~# '^\%('..s:ops[l:g]['end']..'\)')
+					\ ? 'c' : ''
+		if searchpair(
+					\ l:g, '', s:ops[l:g]['end'],
+					\ 'nbz'..l:f, "s:InStringlike()", l:l)
 			return 1
 		endif
 	endfor
 endfunction
 
-" TODO: reorganize functions to be in a logical order
+" returns 1 if the operator has the flag. if end is nonzero, the ending flags 
+" are considered instead. in reality, this just makes it convert the flag 
+" argument to upper case before checking comparison. when end = 0, the flag 
+" argument is not touched
+" preconditions: script vars are generated
+function s:OperHasFlag(oper, flag, end = 0)
+	let l:flags = s:ops[a:oper]->has_key('flags')
+				\ ? s:ops[a:oper]['flags'] : s:dflags
+	" force 'a' flag for groups
+	if !a:end && l:flags !~# 'a' && s:groups->index(a:oper) >= 0
+		let l:flags ..= 'a'
+	endif
+	return l:flags =~# (a:end ? toupper(a:flag) : a:flag)
+endfunction
 
 " finds pattern on the line
-function s:FindOnLine(pat, flags)
+function s:FindOnLine(pat, flags = '')
 	return search(a:pat, a:flags, line('.'), 0, s:skip_expr)
 endfunction
+" finds pair on the line using searchpair
+function s:FindPairOnLine(group, flags = '')
+	return searchpair(
+				\ a:group, '', s:ops[a:group]['end'],
+				\ a:flags, s:skip_expr, line('.'))
+endfunction
+" return byte column at the end of the first match of {pat} on the cursor line 
+" (-1 if not found):
+"	when pat =      'the'
+"	return that column ^
+function s:MatchEnd(pat)
+	return getline('.')->matchstrpos(a:pat, col('.') - 1)[2]
+endfunction
+" returns true if the match is either preceded or followed by only spaces.
+" preconditions: cursor is on the start of the match if before is 1
+function s:MatchIsSpaced(pat, before)
+	return a:before && (col('.') <= 1 || getline('.')[:col('.')-2] =~# '^\s*$')
+				\ || !a:before && getline('.')[s:MatchEnd(a:pat):] =~# '^\s*$'
+endfunction
+
 " finds operator if unexpanded on the line. returns 0 if not found
-function s:FindOper(oper, flags)
+function s:FindOper(oper, flags = '')
 	" match has to not be followed by only whitespace
 	if s:OperHasFlag(a:oper, 'a') && s:FindOnLine(a:oper, a:flags) &&
-				\ getline('.')[s:MatchEnd(a:oper):] !~ '^\s*$'
+				\ !s:MatchIsSpaced(a:oper, 0)
 		return 1
 	endif
 	if s:OperHasFlag(a:oper, 'b')
 		" match has to not be prepended by only whitespace. if it was, there 
 		" must be another match after it
 		let l:noc = substitute(a:flags, 'c', '', '')
-		if (s:FindOnLine(a:oper, a:flags) &&
-					\ getline('.')[:col('.') - 2] !~ '^\s*$') ||
+		if s:FindOnLine(a:oper, a:flags) && !s:MatchIsSpaced(a:oper, 1) ||
 					\ s:FindOnLine(a:oper, l:noc)
 			return 1
 		endif
@@ -74,60 +110,47 @@ function s:FindOper(oper, flags)
 	return 0
 endfunction
 
-" finds pair on the line using searchpair
-function s:FindPairOnLine(start, mid, end, flags)
-	return searchpair(a:start, a:mid, a:end, a:flags, s:skip_expr, line('.'))
+" insert a line break with optional mode instead of insert
+function s:InsertBreak(mode = 'i')
+	exe "norm! " . a:mode . "\<CR>"
+	redraw
+	sleep 200m
 endfunction
-
-function s:OperHasFlag(oper, flag, end = 0)
-	let l:flags = g:dogops[a:oper]->has_key('flags') ? g:dogops[a:oper]['flags'] : s:dflags
-	if g:doggroups->index(a:oper) >= 0
-		let l:flags .= 'a'
+" return byte column where the break for the operator would be inserted and a 
+" value that says whether it could have more to insert (1) or not (0). [col, 
+" more]
+function s:BreakCol(oper, end = 0)
+	let l:realpat = a:end ? s:ops[a:oper]['end'] : a:oper
+	if s:OperHasFlag(a:oper, 'b', a:end) && !s:MatchIsSpaced(l:realpat, 1)
+		return [col('.'), s:OperHasFlag(a:oper, 'a', a:end)]
 	endif
-	return l:flags =~# (a:end ? toupper(a:flag) : a:flag)
+	if s:OperHasFlag(a:oper, 'a', a:end) && !s:MatchIsSpaced(l:realpat, 0)
+		return [s:MatchEnd(l:realpat) + 1, 0]
+	endif
+	" has neither of the flags
+	return [-1, 0]
 endfunction
-
-" move cursor to end of match, so an insert command would insert directly after
-function s:MatchEnd(pat)
-	let l:len = getline('.')->matchstr(a:pat, col('.') - 1)->strlen()
-	return col('.') + l:len
-endfunction
-
 " inserts a line break for an operator, handling the flags as needed. assumes 
 " that the cursor is positioned at the start of the pattern match. if end is 
-" non-zero, the g:dogops[a:oper]['end'] is used instead of a:oper. returns new 
+" non-zero, the s:ops[a:oper]['end'] is used instead of a:oper. returns new 
 " number of lines
 function s:OperBreak(oper, end = 0)
 	let l:count = 1
 	let l:ln = line('.')
-	let l:realpat = a:end ? g:dogops[a:oper]['end'] : a:oper
-	if s:OperHasFlag(a:oper, 'b', a:end)
-		call s:InsertBreak()
-		call cursor(line('.'), col('.') + 1)
+	let l:more = 1
+	while l:more
+		let [l:col, l:more] = s:BreakCol(a:oper, a:end)
+		if l:col < 0 | break | endif
+		call cursor(0, l:col)
+		call s:InsertBreak(l:col == col('$') ? 'a' : 'i')
 		let l:count += 1
-	endif
-	if s:OperHasFlag(a:oper, 'a', a:end)
-		call cursor(line('.'), s:MatchEnd(l:realpat) - 1)
-		" append in case it's the end of the line
-		call s:InsertBreak('a')
-		let l:count += 1
-	endif
-	" has neither of the flags
-	if !s:OperHasFlag(a:oper, 'b\|a', a:end)
-		throw 'Operator needs at least one of the b or a flags'
-	endif
+	endwhile
 	call cursor(l:ln, 1)
 	return l:count
 endfunction
 
-function s:InsertBreak(mode = 'i')
-	exe "norm! " . a:mode . "\<CR>"
-endfunction
-
 function s:ComparePrecedence(i1, i2)
-	let [l:z1, l:z2] = [g:dogops[a:i1]['z'], g:dogops[a:i2]['z']]
-	if l:z1 == l:z2 | return 0 | endif
-	return l:z1 - l:z2
+	return s:ops[a:i1]['z'] - s:ops[a:i2]['z']
 endfunction
 
 " expands the group (key of doggroups) in line lnum. otherwise the same as 
@@ -135,7 +158,7 @@ endfunction
 function s:ExpandGroup(lnum, group)
 	let l:count = 0
 	call cursor(a:lnum, 1)
-	call s:FindOnLine(a:group, '')
+	call s:FindOnLine(a:group)
 	let l:count += s:OperBreak(a:group) - 1
 	let l:expandcount = s:ExpandLine(a:lnum) - 1
 	let l:count += l:expandcount
@@ -144,7 +167,7 @@ function s:ExpandGroup(lnum, group)
 	if l:expandcount > 0
 		exe (a:lnum + l:expandcount) . ',' . (a:lnum + l:count - 1) . 'norm! =='
 	endif
-	call s:FindPairOnLine(a:group, '', g:dogops[a:group]['end'], '')
+	call s:FindPairOnLine(a:group)
 	let l:opercount = s:OperBreak(a:group, 1) - 1
 	" expand the contents
 	let l:count += s:ExpandLine(a:lnum + l:count) - 1
@@ -183,18 +206,21 @@ function s:ExpandLine(lnum)
 		return 1
 	endif
 	let l:chosen = ''
-	for l:operator in keys(g:dogops)->sort("s:ComparePrecedence")
+	for l:operator in s:opkeys
 		call cursor(a:lnum, 1)
 		" if the operator isn't found, skip it
-		if s:FindOper(l:operator, '') == 0
+		if !s:FindOper(l:operator)
 			call cursor(a:lnum, 1)
-			if s:FindOper(l:operator, 'c') == 0
+			" make sure it's not just under the cursor. this has to be done 
+			" separately because for some reason the 'c' flag makes search() 
+			" stop searching after the first skipped match
+			if !s:FindOper(l:operator, 'c')
 				continue
 			endif
 		endif
 		" check if it's suboptimal (leaves the line overflowing, so keep 
 		" searching for an optimal choice)
-		if virtcol('.') > &textwidth
+		if s:BreakCol(l:operator)[0] - 1 > &textwidth
 			" don't override existing suboptimal choice
 			if l:chosen == '' | let l:chosen = l:operator | endif
 			continue
@@ -206,18 +232,23 @@ function s:ExpandLine(lnum)
 	if l:chosen == '' | return 1 | endif
 	call cursor(a:lnum, 1)
 	" expand it as a group if it's a group operator
-	if g:doggroups->index(l:chosen) >= 0
+	if s:groups->index(l:chosen) >= 0
 		return s:ExpandGroup(a:lnum, l:chosen)
 	else
 		return s:ExpandOpers(a:lnum, l:chosen)
 	endif
 endfunction
 
-function DogFormat(lnum = v:lnum, count = v:count, char = v:char)
+function DogFormat(lnum = v:lnum, count = v:count)
 	" TODO: support autoformatting while inserting
 	if mode() =~? 'R\|i'
 		return 1
 	endif
+	" generate script vars
+	let s:ops = extendnew(s:dops, g:dogops, "force")
+	let s:opkeys = keys(s:ops)->sort("s:ComparePrecedence")
+	let s:groups = s:opkeys->copy()->filter("s:ops[v:val]->has_key('end')")
+	" expand the lines
 	let l:lnum = a:lnum
 	for l:i in range(a:count)
 		let l:lnum += s:ExpandLine(l:lnum)
