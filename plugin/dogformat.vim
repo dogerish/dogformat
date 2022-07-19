@@ -7,12 +7,13 @@ if !exists("g:dogops") | let g:dogops = {} | endif
 "	b - break before this operator
 "	a - break after this operator (always on for groups)
 "	B - break before the ending operator
-let s:dflags = 'aB'
+"	l - break at the last occurence before textwidth
+let s:dflags = 'aBl'
 let s:dops = {
 			\ '\[':                                                 { 'z': 20, 'end':   '\]' },
 			\ '\.':                                                 { 'z': 19, 'flags': 'b'  },
 			\ '(':                                                  { 'z': 18, 'end':   ')'  },
-			\ '{':                                                  { 'z': 17, 'end':   '}', 'flags': 'baB' },
+			\ '{':                                                  { 'z': 17, 'end':   '}', 'flags': 'b'..s:dflags },
 			\ '\*\*':                                               { 'z': 13  },
 			\ '*\|\/\|%':                                           { 'z': 12  },
 			\ '+\|-':                                               { 'z': 11  },
@@ -97,8 +98,9 @@ endfunction
 " finds operator if unexpanded on the line. returns 0 if not found
 function s:FindOper(oper, flags = '')
 	" match has to not be followed by only whitespace
-	if s:OperHasFlag(a:oper, 'a') && s:FindOnLine(a:oper, a:flags) &&
-				\ !s:MatchIsSpaced(a:oper, 0)
+	if s:OperHasFlag(a:oper, 'a') && (s:FindOnLine(a:oper, a:flags) &&
+				\ !s:MatchIsSpaced(a:oper, 0) || a:flags =~# 'b' &&
+				\ s:FindOnLine(a:oper, a:flags))
 		return 1
 	endif
 	if s:OperHasFlag(a:oper, 'b')
@@ -106,7 +108,7 @@ function s:FindOper(oper, flags = '')
 		" must be another match after it
 		let l:noc = substitute(a:flags, 'c', '', '')
 		if s:FindOnLine(a:oper, a:flags) && !s:MatchIsSpaced(a:oper, 1) ||
-					\ s:FindOnLine(a:oper, l:noc)
+					\ a:flags !~# 'b' && s:FindOnLine(a:oper, l:noc)
 			return 1
 		endif
 	endif
@@ -116,36 +118,61 @@ endfunction
 
 " insert a line break with optional mode instead of insert
 function s:InsertBreak(mode = 'i')
-	exe "norm! " . a:mode . "\<CR>"
+	exe "norm! "..a:mode.."\<CR>"
 	if g:dogslow
 		redraw
 		exe 'sleep '..g:dogslow..'m'
 	endif
 endfunction
 " return byte column where the break for the operator would be inserted and a 
-" value that says whether it could have more to insert (1) or not (0). [col, 
-" more]
-function s:BreakCol(oper, end = 0)
+" value that says whether it could have more to insert (1) or not (0) for the 
+" current match: [col, more]. the more parameter should be the same as what was 
+" returned on the last one. if it is 0, s:BreakCol will try to find the next 
+" match instead of operating on the match under the cursor
+function s:BreakCol(oper, end = 0, more = 0)
 	let l:realpat = a:end ? s:ops[a:oper]['end'] : a:oper
+	if !a:more
+		" find next match
+		let l:found = 0
+		" operator wants last occurrence
+		if s:OperHasFlag(a:oper, 'l') && !a:end
+			" line too short for it to make sense
+			if virtcol('$')-1 <= &textwidth
+				return [-1, 0]
+			endif
+			" search backwards from textwidth
+			" TODO: do i need to account for 'a' and 'b' operator flags?
+			call cursor(0, &textwidth + 1)
+			if !s:FindOper(a:oper, 'b')
+				" backward didn't work; try searching forward instead
+				call cursor(0, &textwidth)
+				if !s:FindOper(a:oper) | return [-1, 0] | endif
+			endif
+			let l:found = 1
+		endif
+		if !l:found && !(a:end ? s:FindPairOnLine(a:oper) : s:FindOper(a:oper))
+			return [-1, 0]
+		endif
+	endif
 	if s:OperHasFlag(a:oper, 'b', a:end) && !s:MatchIsSpaced(l:realpat, 1)
 		return [col('.'), s:OperHasFlag(a:oper, 'a', a:end)]
 	endif
 	if s:OperHasFlag(a:oper, 'a', a:end) && !s:MatchIsSpaced(l:realpat, 0)
 		return [s:MatchEnd(l:realpat) + 1, 0]
 	endif
-	" has neither of the flags
+	" nothing to do
 	return [-1, 0]
 endfunction
-" inserts a line break for an operator, handling the flags as needed. assumes 
-" that the cursor is positioned at the start of the pattern match. if end is 
+" inserts a line break for an operator, handling the flags as needed. if end is 
 " non-zero, the s:ops[a:oper]['end'] is used instead of a:oper. returns new 
 " number of lines
 function s:OperBreak(oper, end = 0)
 	let l:count = 1
 	let l:ln = line('.')
+	call cursor(0, 1)
 	let l:more = 1
 	while l:more
-		let [l:col, l:more] = s:BreakCol(a:oper, a:end)
+		let [l:col, l:more] = s:BreakCol(a:oper, a:end, l:more && l:count > 1)
 		if l:col < 0 | break | endif
 		call cursor(0, l:col)
 		call s:InsertBreak(l:col == col('$') ? 'a' : 'i')
@@ -164,16 +191,14 @@ endfunction
 function s:ExpandGroup(lnum, group)
 	let l:count = 0
 	call cursor(a:lnum, 1)
-	call s:FindOnLine(a:group)
 	let l:count += s:OperBreak(a:group) - 1
 	let l:expandcount = s:ExpandLine(a:lnum) - 1
 	let l:count += l:expandcount
 	call cursor(a:lnum + l:count, 1)
 	" fix indentation if the opening line was expanded
 	if l:expandcount > 0
-		exe (a:lnum + l:expandcount) . ',' . (a:lnum + l:count - 1) . 'norm! =='
+		exe (a:lnum + l:expandcount)..','..(a:lnum + l:count - 1)..'norm! =='
 	endif
-	call s:FindPairOnLine(a:group)
 	let l:opercount = s:OperBreak(a:group, 1) - 1
 	" expand the contents
 	let l:count += s:ExpandLine(a:lnum + l:count) - 1
@@ -190,11 +215,13 @@ endfunction
 function s:ExpandOpers(lnum, oper)
 	let l:count = 0
 	call cursor(a:lnum, 1)
-	while s:FindOper(a:oper, '')
-		let l:count += s:OperBreak(a:oper) - 2
+	let l:opc = s:OperBreak(a:oper)
+	while l:opc > 1
+		let l:count += l:opc - 2
 		let l:count += s:ExpandLine(a:lnum + l:count)
 		" proceed to after the expanded line
 		call cursor(a:lnum + l:count, 1)
+		let l:opc = s:OperBreak(a:oper)
 	endwhile
 	let l:count += s:ExpandLine(a:lnum + l:count) - 1
 	call cursor(a:lnum, 1)
@@ -226,7 +253,7 @@ function s:ExpandLine(lnum)
 		endif
 		" check if it's suboptimal (leaves the line overflowing, so keep 
 		" searching for an optimal choice)
-		if s:BreakCol(l:operator)[0] - 1 > &textwidth
+		if s:BreakCol(l:operator, 0, 1)[0] - 1 > &textwidth
 			" don't override existing suboptimal choice
 			if l:chosen == '' | let l:chosen = l:operator | endif
 			continue
