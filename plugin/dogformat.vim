@@ -1,17 +1,31 @@
-" when 1, it redraws and pauses for this amount of milliseconds after each 
-" insert. nice for debugging or demo'ing
-if !exists("g:dogslow") | let g:dogslow = 0 | endif
-" Add or override operators
-if !exists("g:dogops") | let g:dogops = {} | endif
+								  " dogslow "
+" When non-zero, the formatter redraws and pauses for this amount of 
+" milliseconds after each insert. Helpful for debugging or demoing. Default 0.
+
+								  " dogops "
+" Add or override operators. This is put on top of the default operators and 
+" follows the same format. Default {}.
+
+								  " doglong "
+" The maximum length that a section can be in-line for operators with the 'L' 
+" flag. Leading and trailing white-space is ignored in the length calculation, 
+" and the section length must be greater than doglong to invoke separation. A 
+" value of '0' would allow blank sections to accumulate on a line, and a value 
+" of '-1' would allow nothing to accumulate, exactly like if the operator had 
+" the 'l' flag instead of the 'L' flag. Default 20.
+
+
 " flags:
 "	b - break before this operator
 "	a - break after this operator (always on for groups)
 "	B - break before the ending operator
-"	l - break at the last occurence before textwidth
-let s:dflags = 'aBl'
+"	l - break at the last occurrence before textwidth
+"	L - put long sections defined by doglong on a separate line (implies l). 
+"	    Only available for non-groups.
+let s:dflags = 'aBLl'
 let s:dops = {
 			\ '\[':                                                 { 'z': 20, 'end':   '\]' },
-			\ '\.':                                                 { 'z': 19, 'flags': 'b'  },
+			\ '\.':                                                 { 'z': 19, 'flags': 'bL' },
 			\ '(':                                                  { 'z': 18, 'end':   ')'  },
 			\ '{':                                                  { 'z': 17, 'end':   '}', 'flags': 'b'..s:dflags },
 			\ '\*\*':                                               { 'z': 13  },
@@ -33,6 +47,8 @@ let s:dops = {
 let s:ops = {}
 let s:opkeys = []
 let s:groups = []
+let s:slow = 0
+let s:long = 20
 
 let s:skip_expr = 's:InStringlike() || s:InGroup()'
 " returns 1 if position line, col is in a string-like (string or comment)
@@ -56,19 +72,37 @@ function s:InGroup()
 	endfor
 endfunction
 
-" returns 1 if the operator has the flag. if end is nonzero, the ending flags 
-" are considered instead. in reality, this just makes it convert the flag 
-" argument to upper case before checking comparison. when end = 0, the flag 
-" argument is not touched
-" preconditions: script vars are generated
-function s:OperHasFlag(oper, flag, end = 0)
-	let l:flags = s:ops[a:oper]->has_key('flags')
-				\ ? s:ops[a:oper]['flags'] : s:dflags
-	" force 'a' flag for groups
-	if !a:end && l:flags !~# 'a' && s:groups->index(a:oper) >= 0
-		let l:flags ..= 'a'
+function s:OpIsGroup(op)
+	return a:op->has_key('end')
+endfunction
+function s:OpKeyIsGroup(opkey)
+	return s:OpIsGroup(s:ops[a:opkey])
+endfunction
+" cleans up flags, adding implicit or required flags
+function s:CleanFlags(op)
+	let l:fl = a:op->has_key('flags') ? a:op['flags'] : s:dflags
+	" remove L flag for groups
+	if l:fl =~# 'L' && s:OpIsGroup(a:op)
+		let l:fl = substitute(l:fl, '\CL', '', '')
 	endif
-	return l:flags =~# (a:end ? toupper(a:flag) : a:flag)
+	" force 'l' flag when the 'L' flag is present
+	if l:fl =~# 'L' && l:fl !~# 'l'
+		let l:fl ..= 'l'
+	endif
+	" force 'a' flag for groups
+	if l:fl !~# 'a' && s:OpIsGroup(a:op)
+		let l:fl ..= 'a'
+	endif
+	let a:op['flags'] = l:fl
+endfunction
+
+" Returns 1 if the operator has the flag. If end is nonzero, the ending flags 
+" are considered instead. In reality, this just makes it convert the flag 
+" argument to upper case before checking comparison. When end = 0, the flag 
+" argument is not touched.
+" preconditions: script vars are generated
+function s:GetFlag(oper, flag, end = 0)
+	return s:ops[a:oper]['flags'] =~# (a:end ? toupper(a:flag) : a:flag)
 endfunction
 
 " finds pattern on the line
@@ -95,16 +129,20 @@ function s:MatchIsSpaced(pat, before)
 				\ || !a:before && getline('.')[s:MatchEnd(a:pat):] =~# '^\s*$'
 endfunction
 
-" finds operator if unexpanded on the line. returns 0 if not found
+function s:ByteToVirtCol(col)
+	return getline('.')[: a:col-1]->strdisplaywidth()
+endfunction
+
+" Finds operator if unexpanded on the line. Returns 0 if not found
 function s:FindOper(oper, flags = '')
-	" match has to not be followed by only whitespace
-	if s:OperHasFlag(a:oper, 'a') && (s:FindOnLine(a:oper, a:flags) &&
+	" match has to not be followed by only white-space
+	if s:GetFlag(a:oper, 'a') && (s:FindOnLine(a:oper, a:flags) &&
 				\ !s:MatchIsSpaced(a:oper, 0) || a:flags =~# 'b' &&
 				\ s:FindOnLine(a:oper, a:flags))
 		return 1
 	endif
-	if s:OperHasFlag(a:oper, 'b')
-		" match has to not be prepended by only whitespace. if it was, there 
+	if s:GetFlag(a:oper, 'b')
+		" match has to not be prepended by only white-space. if it was, there 
 		" must be another match after it
 		let l:noc = substitute(a:flags, 'c', '', '')
 		if s:FindOnLine(a:oper, a:flags) && !s:MatchIsSpaced(a:oper, 1) ||
@@ -119,53 +157,93 @@ endfunction
 " insert a line break with optional mode instead of insert
 function s:InsertBreak(mode = 'i')
 	exe "norm! "..a:mode.."\<CR>"
-	if g:dogslow
+	if s:slow
 		redraw
-		exe 'sleep '..g:dogslow..'m'
+		exe 'sleep '..s:slow..'m'
 	endif
 endfunction
-" return byte column where the break for the operator would be inserted and a 
+
+function s:GetSectLength(startcol, endcol)
+	return getline('.')[a:startcol-1 : a:endcol-1]->trim()->strdisplaywidth()
+endfunction
+function s:SectNeedsSplit(startcol, endcol)
+	return s:GetSectLength(a:startcol, a:endcol) > s:long ||
+				\ s:ByteToVirtCol(a:endcol) > &textwidth
+endfunction
+
+" Return byte column where the break for the operator would be inserted and a 
 " value that says whether it could have more to insert (1) or not (0) for the 
-" current match: [col, more]. the more parameter should be the same as what was 
-" returned on the last one. if it is 0, s:BreakCol will try to find the next 
-" match instead of operating on the match under the cursor
+" current match: [col, more]. The more parameter should be the same as what was 
+" returned on the last one. If it is 0, s:BreakCol will try to find the next 
+" match instead of operating on the match under the cursor.
 function s:BreakCol(oper, end = 0, more = 0)
 	let l:realpat = a:end ? s:ops[a:oper]['end'] : a:oper
 	if !a:more
 		" find next match
-		let l:found = 0
 		" operator wants last occurrence
-		if s:OperHasFlag(a:oper, 'l') && !a:end
-			" line too short for it to make sense
-			if virtcol('$')-1 <= &textwidth
+		if s:GetFlag(a:oper, 'l') && !a:end
+			" operator wants to break on long sections
+			if s:GetFlag(a:oper, 'L')
+				" try to find one that needs its own line first
+				let l:last = col('.')
+				let l:last_end = col('.')
+				let l:iter_count = 0
+				let l:found = 0
+				while s:FindOper(a:oper)
+					if s:SectNeedsSplit(l:last_end + 1, col('.') - 1)
+						" this section needs to be on its own line
+						" go to the last match if this section isn't the first 
+						" of the line
+						if l:iter_count | call cursor(0, l:last) | endif
+						let l:found = 1
+						break
+					endif
+					let l:last = col('.')
+					let l:last_end = s:MatchEnd(a:oper)
+					let l:iter_count += 1
+				endwhile
+				" nothing found if no section was long enough or went past 
+				" textwidth, and the remaining section doesn't need to be 
+				" split, or there is no matching operator on the line, even 
+				" starting from the cursor.
+				if !l:found && !(l:iter_count && 
+							\ s:SectNeedsSplit(l:last_end+1, col('$')-1))
+					return [-1, 0]
+				endif
+			else
+				" line too short for it to make sense
+				if virtcol('$')-1 <= &textwidth
+					return [-1, 0]
+				endif
+				" search backwards from textwidth
+				" TODO: do i need to account for 'a' and 'b' operator flags?
+				call cursor(0, &textwidth + 1)
+				if !s:FindOper(a:oper, 'b')
+					" backward didn't work; try searching forward instead
+					call cursor(0, &textwidth)
+					if !s:FindOper(a:oper) | return [-1, 0] | endif
+				endif
+			endif
+		else
+			" break on the first one
+			if !(a:end ? s:FindPairOnLine(a:oper) : s:FindOper(a:oper, 'c'))
 				return [-1, 0]
 			endif
-			" search backwards from textwidth
-			" TODO: do i need to account for 'a' and 'b' operator flags?
-			call cursor(0, &textwidth + 1)
-			if !s:FindOper(a:oper, 'b')
-				" backward didn't work; try searching forward instead
-				call cursor(0, &textwidth)
-				if !s:FindOper(a:oper) | return [-1, 0] | endif
-			endif
-			let l:found = 1
-		endif
-		if !l:found && !(a:end ? s:FindPairOnLine(a:oper) : s:FindOper(a:oper))
-			return [-1, 0]
 		endif
 	endif
-	if s:OperHasFlag(a:oper, 'b', a:end) && !s:MatchIsSpaced(l:realpat, 1)
-		return [col('.'), s:OperHasFlag(a:oper, 'a', a:end)]
+	if s:GetFlag(a:oper, 'b', a:end) && !s:MatchIsSpaced(l:realpat, 1)
+		return [col('.'), s:GetFlag(a:oper, 'a', a:end)]
 	endif
-	if s:OperHasFlag(a:oper, 'a', a:end) && !s:MatchIsSpaced(l:realpat, 0)
+	if s:GetFlag(a:oper, 'a', a:end) && !s:MatchIsSpaced(l:realpat, 0)
 		return [s:MatchEnd(l:realpat) + 1, 0]
 	endif
 	" nothing to do
 	return [-1, 0]
 endfunction
-" inserts a line break for an operator, handling the flags as needed. if end is 
-" non-zero, the s:ops[a:oper]['end'] is used instead of a:oper. returns new 
-" number of lines
+
+" Inserts a line break for an operator, handling the flags as needed. If end is 
+" non-zero, the s:ops[a:oper]['end'] is used instead of a:oper. Returns new 
+" number of lines.
 function s:OperBreak(oper, end = 0)
 	let l:count = 1
 	let l:ln = line('.')
@@ -186,8 +264,7 @@ function s:ComparePrecedence(i1, i2)
 	return s:ops[a:i1]['z'] - s:ops[a:i2]['z']
 endfunction
 
-" expands the group (key of doggroups) in line lnum. otherwise the same as 
-" s:ExpandLine
+" Expands the group (key of doggroups) in line lnum.
 function s:ExpandGroup(lnum, group)
 	let l:count = 0
 	call cursor(a:lnum, 1)
@@ -210,8 +287,7 @@ function s:ExpandGroup(lnum, group)
 	return l:count + 1
 endfunction
 
-" expands the operator sequence on line lnum into multiple lines. like 
-" s:ExpandLine
+" Expands the operator sequence on line lnum into multiple lines.
 function s:ExpandOpers(lnum, oper)
 	let l:count = 0
 	call cursor(a:lnum, 1)
@@ -228,7 +304,7 @@ function s:ExpandOpers(lnum, oper)
 	return l:count + 1
 endfunction
 
-" expands the line lnum as much as needed to try and meet the textwidth 
+" Expands the line lnum as much as needed to try and meet the textwidth 
 " criteria. Returns the number of lines that the original line now takes up. If 
 " no changes are made, 1 will be returned (still 1 line of occupancy). Cursor 
 " is placed at the beginning of the expanded line and in column 1
@@ -272,15 +348,32 @@ function s:ExpandLine(lnum)
 	endif
 endfunction
 
+function s:GetOption(option, default, scopes = 'bg')
+	for l:scope in a:scopes->split('\zs')
+		if exists(l:scope .. ':' .. a:option)
+			return eval(l:scope .. ':' .. a:option)
+		endif
+	endfor
+	return a:default
+endfunction
+
 function DogFormat(lnum = v:lnum, count = v:count)
-	" TODO: support autoformatting while inserting
+	" TODO: support auto-formatting while inserting
 	if mode() =~? 'R\|i'
 		return 1
 	endif
+
 	" generate script vars
-	let s:ops = extendnew(s:dops, g:dogops, "force")
+	let s:ops = extendnew(s:dops, deepcopy(s:GetOption('dogops', {})), "force")
 	let s:opkeys = keys(s:ops)->sort("s:ComparePrecedence")
-	let s:groups = s:opkeys->copy()->filter("s:ops[v:val]->has_key('end')")
+	let s:groups = s:opkeys->copy()->filter("s:OpKeyIsGroup(v:val)")
+	let s:slow = s:GetOption('dogslow', 0)
+	let s:long = s:GetOption('doglong', 20)
+	" clean up flags
+	for l:op in s:opkeys
+		call s:CleanFlags(s:ops[l:op])
+	endfor
+
 	" expand the lines
 	let l:lnum = a:lnum
 	for l:i in range(a:count)

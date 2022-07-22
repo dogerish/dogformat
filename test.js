@@ -13,7 +13,7 @@ console.log("bruh how cool do i look)", 420, 53);
 // of ()
 Discord.fetch("your mother").then(() => { do stuff; return bruh; }).catch(err => console.log("uh oh"));
 deez_nuts[23].favorite_number.actual_value(420, 59);
-long_list = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 2000000]
+long_list = [1, 123456789, 3, 4, 5, 6, 7, 876543210, 9, 10, 2000000]
 // TODO: slower on breaking after an 
 // equals sign
 Camera = new Object("CAMERA", new Vector2(ScreenWidth, ScreenHeight), new Vector2(0, 0));
