@@ -1,27 +1,3 @@
-                                  " dogslow "
-" When non-zero, the formatter redraws and pauses for this amount of 
-" milliseconds after each insert. Helpful for debugging or demoing. Default 0.
-
-                                  " dogops "
-" Add or override operators. This is put on top of the default operators and 
-" follows the same format. Default {}.
-
-                                  " doglong "
-" The maximum length that a section can be in-line for operators with the 'L' 
-" flag. Leading and trailing white-space is ignored in the length calculation, 
-" and the section length must be greater than doglong to invoke separation. A 
-" value of '0' would allow blank sections to accumulate on a line, and a value 
-" of '-1' would allow nothing to accumulate, exactly like if the operator had 
-" the 'l' flag instead of the 'L' flag. Default 20.
-
-
-" flags:
-"   b - break before this operator
-"   a - break after this operator (always on for groups)
-"   B - break before the ending operator
-"   l - break at the last occurrence before textwidth
-"   L - put long sections defined by doglong on a separate line (implies l). 
-"       Only available for non-groups.
 let s:dflags = 'aBLl'
 let s:dops = {
             \ '\[':                                                 { 'z': 20, 'end':   '\]' },

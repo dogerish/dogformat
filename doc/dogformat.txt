@@ -1,0 +1,109 @@
+*dogformat.txt*	For Vim version 8.2	Last change: 2022 June 23
+
+Help on dogerish's formatter                                       *dogformat*
+
+1. Quick start                                          |dogformat-quickstart|
+2. Options                                                 |dogformat-options|
+3. Operator Format                                 |dogformat-operator-format|
+
+==============================================================================
+1. Quick start                           *dogformat-quickstart* *dogformat-qs*
+
+DogFormat works as the 'formatexpr' option. The global `DogFormat()` function 
+is the entry point; simply set 'formatexpr' equal to it. >
+	set formatexpr=DogFormat()
+<
+
+==============================================================================
+2. Options                                                 *dogformat-options*
+
+DogFormat looks in the buffer and global scope for options, in that order. If 
+an option is not defined in any of the scopes, it will use the default value. 
+You can unset an option with the `unlet` vim command.
+
+*dogslow*                                   *dogformat-delay* *dogformat-slow*
+	Default: 0
+	When non-zero, the formatter redraws and pauses for this amount of 
+	milliseconds after each insert. This is helpful for debugging or 
+	demoing. >
+		" Delay for 100 milliseconds
+		:let g:dogslow = 100
+<
+
+*dogops*                                                 *dogformat-operators*
+	Default: {}
+	Add or override operators. This is put on top of the default operators 
+	and follows the same |dogformat-operator-format|. See 
+	`../plugin/dogformat.vim` for the default operators. >
+		" Break before pointer access operator
+		let g:dogops = { '->': #{ z: 19, flags: 'b' } }
+<
+
+*doglong*                             *dogformat-longest* *dogformat-sections*
+	Default: 20
+	The maximum length that an in-line section can be for operators with 
+	the "L" flag (|dogformat-operator-flag-L|). Leading and trailing 
+	white-space is ignored in the length calculation, and the section 
+	length must be greater than |doglong| for it to be separated. For 
+	example, A value of "0" allows blank sections to accumulate on a line, 
+	whereas a value of "-1" allows nothing to accumulate, as if the 
+	operator has the "l" flag |dogformat-operator-flag-l| instead of the 
+	"L" flag. >
+		" ftplugin/javascript.vim
+		" Put 30-character-long sections on their own line
+		let b:doglong = 30
+<
+
+==============================================================================
+3. Operator Format                                 *dogformat-operator-Format*
+
+You can add custom operators or override the default operators using |dogops|. 
+This section describes the format that this option uses.
+
+In the context of DogFormat, an operator is an entry in a dict. The key is a 
+pattern that matches the operator. The value of the operator entry defines 
+behavior for the operator.
+
+Operator Entry Value                                *dogformat-operator-value*
+	The operator entry should be a dict, with the following entries:
+
+	z                                               *dogformat-operator-z*
+		Required - number
+		The z-index, or precedence of the operator. A lower z value 
+		causes the operator to be split up earlier. This is the 
+		reverse of typical precedence, but I call it precedence 
+		because it visually aligns with a programming language's 
+		precedence. We split up at the lower precedence operators 
+		first so that we read the sections that are evaluated 
+		independently, independently.
+		
+		Note that groups, such as (), are expanded before their 
+		contents, regardless of precedence.
+
+	end                         *dogformat-group* *dogformat-operator-end*
+		Optional - string
+		The ending pattern for this operator. If the operator has this 
+		key, it is automatically considered a group.
+
+	flags                                       *dogformat-operator-flags*
+		Optional - string
+		Default: "aBLl"
+		The flags for this operator. Flags define how and where to 
+		break up the operator. Each flag is one character in the 
+		string, and is active if present.
+
+		b                                  *dogformat-operator-flag-b*
+			Break before this operator
+		B                                  *dogformat-operator-flag-B*
+			Break before the ending operator
+		a                                  *dogformat-operator-flag-a*
+			Break after this operator (always on for groups)
+		l                                  *dogformat-operator-flag-l*
+			Break at the last occurrence before 'textwidth'
+
+		L                                  *dogformat-operator-flag-L*
+			Put long sections defined by |doglong| on a separate 
+			line (implies |dogformat-operator-flag-l|). Only 
+			available for non-groups.
+
+vim:ts=8:sw=8:sts=8:noet:tw=78:ft=help:norl:
