@@ -334,9 +334,10 @@ function s:GetOption(option, default, scopes = 'bg')
 endfunction
 
 function DogFormat(lnum = v:lnum, count = v:count)
-    " TODO: support auto-formatting while inserting
-    if mode() =~? 'R\|i'
-        return 1
+    " auto-formatting while inserting isn't possible because the ending 
+    " position of the cursor can't be set and doesn't move automatically
+    if mode() =~# 'R\|i'
+        return 0
     endif
 
     " generate script vars
