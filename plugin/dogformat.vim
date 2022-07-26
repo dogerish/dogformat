@@ -29,10 +29,13 @@ var slow = 0
 var long = 20
 
 var skip_expr = 'InStringlike() || InGroup()'
+# returns the name of the syntax at the cursor
+def GetSynName(): string
+    return synID(line('.'), col('.'), 0)->synIDattr("name")
+enddef
 # returns 1 if position line, col is in a string-like (string or comment)
 def InStringlike(): bool
-    return synID(line('.'), col('.'), 0)->synIDattr("name") =~?
-        'string\|comment'
+    return GetSynName() =~? 'string\|comment'
 enddef
 # returns 1 if the cursor is in a group that starts on the current line
 # preconditions: script vars are generated
@@ -50,6 +53,12 @@ def InGroup(): bool
         endif
     endfor
     return 0
+enddef
+
+# returns true if the whole line is a comment or empty, excluding indentation
+def LineIsComment(): bool
+    return search('\S', 'c', line('.')) == 0 || 
+        search('.', 'c', line('.'), 0, 'GetSynName() =~? "comment"') == 0
 enddef
 
 def OpIsGroup(op: dict<any>): bool
@@ -338,11 +347,25 @@ def GetOption(option: string, default: any, scopes = 'bwtg'): any
     return default
 enddef
 
+# formats with the default formatter instead of DogFormat. returns the line 
+# number after the formatted section
+def DefaultFormat(lnum: number, count: number): number
+    var old_fex = &fex
+    setlocal fex=
+    try
+        execute 'norm! ' .. lnum .. 'GV' .. (lnum + count - 1) .. 'Ggq'
+    finally
+        &fex = old_fex
+    endtry
+    return line('.') + 1
+enddef
+
 def g:DogFormat(lnum = v:lnum, count = v:count): number
     # auto-formatting while inserting isn't possible because the ending 
-    # position of the cursor can't be set and doesn't move automatically
+    # position of the cursor can't be set and doesn't move automatically. use 
+    # default formatting for comments
     if mode() =~# 'R\|i'
-        return 0
+        return LineIsComment() ? 1 : 0
     endif
 
     # generate script vars
@@ -356,10 +379,30 @@ def g:DogFormat(lnum = v:lnum, count = v:count): number
         CleanFlags(ops[op])
     endfor
 
-    # expand the lines
     var l = lnum
+    # start of a comment section
+    var com_start = 0
+    # expand the lines
     for i in range(count)
+        cursor(l, 1)
+        # skip comment lines
+        if LineIsComment()
+            if com_start == 0
+                com_start = l
+            endif
+            l += 1
+            continue
+        endif
+        # use default formatting on comment section
+        if com_start != 0
+            l = DefaultFormat(com_start, l - com_start)
+            com_start = 0
+        endif
         l += ExpandLine(l)
     endfor
+    if com_start != 0
+        l = DefaultFormat(com_start, l - com_start)
+    endif
+    cursor(l - 1, 1)
     return 0
 enddef
