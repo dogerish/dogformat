@@ -10,16 +10,19 @@ Help on dogerish's formatter                                       *dogformat*
 1. Quick start                           *dogformat-quickstart* *dogformat-qs*
 
 DogFormat works as the 'formatexpr' option. The global `DogFormat()` function 
-is the entry point; simply set 'formatexpr' equal to it. >
+is the entry point; simply set 'formatexpr' equal to it. Because Vim does not 
+let the script define where the cursor ends up when formatting while 
+inserting, the script simply refuses to do anything in the mode. Use |gq| 
+manually in normal or visual mode to format the code. >
 	set formatexpr=DogFormat()
 <
 
 ==============================================================================
 2. Options                                                 *dogformat-options*
 
-DogFormat looks in the buffer and global scope for options, in that order. If 
-an option is not defined in any of the scopes, it will use the default value. 
-You can unset an option with the `unlet` vim command.
+DogFormat looks in the buffer, window, tab, and global scope for options, in 
+that order. If an option is not defined in any of the scopes, it will use the 
+default value. You can unset an option with the `unlet` vim command.
 
 *dogslow*                                   *dogformat-delay* *dogformat-slow*
 	Default: 0
